@@ -1,0 +1,1 @@
+worker: python bot9.py
