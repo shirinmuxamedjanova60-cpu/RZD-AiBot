@@ -5,29 +5,24 @@ import os
 from flask import Flask
 from threading import Thread
 
-# --- НАСТРОЙКИ (Данные из Render Environment Variables) ---
+# --- НАСТРОЙКИ ---
 TELEGRAM_TOKEN = os.environ.get('TELEGRAM_TOKEN')
 OPENROUTER_KEY = os.environ.get('OPENROUTER_KEY')
-
-# ЗАМЕНЕНО: Поставил самую надежную бесплатную модель Mistral
 MODEL_NAME = "mistralai/mistral-7b-instruct:free"
 
 bot = telebot.TeleBot(TELEGRAM_TOKEN)
 app = Flask('')
 
-# --- ВЕБ-СЕРВЕР ДЛЯ ПОДДЕРЖАНИЯ ЖИЗНИ ---
 @app.route('/')
 def home():
-    return "Бот активен!"
+    return "Бот работает!"
 
 def run_web():
     app.run(host='0.0.0.0', port=8080)
 
-# --- ОБРАБОТКА СООБЩЕНИЙ ---
 @bot.message_handler(func=lambda message: True)
 def handle_ai_request(message):
-    print(f"--- Получено: {message.text} ---")
-    
+    print(f"--- Новое сообщение: {message.text} ---")
     try:
         response = requests.post(
             url="https://openrouter.ai/api/v1/chat/completions",
@@ -37,11 +32,10 @@ def handle_ai_request(message):
                 "HTTP-Referer": "https://render.com",
                 "X-Title": "RZDBot"
             },
-            # Измените эту строку в handle_ai_request, если бот выдает программный код
-data=json.dumps({
-    "model": "mistralai/mistral-7b-instruct:free",
-    "messages": [{"role": "user", "content": message.text}]
-})
+            data=json.dumps({
+                "model": MODEL_NAME,
+                "messages": [{"role": "user", "content": message.text}]
+            }),
             timeout=30
         )
         
@@ -52,22 +46,19 @@ data=json.dumps({
             ai_message = result['choices'][0]['message']['content']
             bot.reply_to(message, ai_message)
         else:
-            # Бот теперь напишет в чат точную техническую ошибку
-            error_text = result.get('error', {}).get('message', 'Неизвестная ошибка')
-            bot.reply_to(message, f"Ошибка от ИИ: {error_text}")
-            print(f"Ошибка API: {result}")
+            error_text = result.get('error', {}).get('message', 'Ошибка API')
+            bot.reply_to(message, f"ИИ недоступен: {error_text}")
             
     except Exception as e:
         print(f"Ошибка: {e}")
-        bot.reply_to(message, f"Техническая ошибка: {str(e)}")
+        bot.reply_to(message, f"Произошла ошибка: {str(e)}")
 
-# --- ЗАПУСК ---
 if __name__ == "__main__":
+    # Запуск веб-сервера
     server_thread = Thread(target=run_web)
     server_thread.daemon = True
     server_thread.start()
     
-    print("Бот успешно запущен!")
-    # infinity_polling защищает от вылетов при перезагрузке
+    print("Бот запущен!")
+    # infinity_polling решит проблему 409 Conflict при перезагрузке
     bot.infinity_polling(timeout=20, long_polling_timeout=10)
-
