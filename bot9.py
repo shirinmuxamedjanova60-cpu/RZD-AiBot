@@ -37,10 +37,11 @@ def handle_ai_request(message):
                 "HTTP-Referer": "https://render.com",
                 "X-Title": "RZDBot"
             },
-            data=json.dumps({
-                "model": MODEL_NAME,
-                "messages": [{"role": "user", "content": message.text}]
-            }),
+            # Измените эту строку в handle_ai_request, если бот выдает программный код
+data=json.dumps({
+    "model": "mistralai/mistral-7b-instruct:free",
+    "messages": [{"role": "user", "content": message.text}]
+})
             timeout=30
         )
         
@@ -69,3 +70,4 @@ if __name__ == "__main__":
     print("Бот успешно запущен!")
     # infinity_polling защищает от вылетов при перезагрузке
     bot.infinity_polling(timeout=20, long_polling_timeout=10)
+
