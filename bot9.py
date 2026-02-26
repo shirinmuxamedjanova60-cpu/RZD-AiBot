@@ -1,4 +1,6 @@
 import asyncio
+import os
+from aiohttp import web
 from aiogram import Bot, Dispatcher, F, types
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
@@ -14,6 +16,18 @@ dp = Dispatcher()
 
 class Order(StatesGroup):
     waiting_for_target = State()
+
+async def handle(request):
+    return web.Response(text="Bot is alive")
+
+async def run_http_server():
+    app = web.Application()
+    app.router.add_get("/", handle)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    port = int(os.environ.get("PORT", 10000))
+    site = web.TCPSite(runner, '0.0.0.0', port)
+    await site.start()
 
 def main_kb():
     return InlineKeyboardMarkup(inline_keyboard=[
@@ -145,6 +159,7 @@ async def success(message: types.Message, state: FSMContext):
     await state.clear()
 
 async def main():
+    asyncio.create_task(run_http_server())
     await bot.delete_webhook(drop_pending_updates=True)
     await dp.start_polling(bot)
 
