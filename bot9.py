@@ -1,76 +1,152 @@
-import telebot
-import requests
-import json
-import os
-from flask import Flask
-from threading import Thread
+import asyncio
+from aiogram import Bot, Dispatcher, F, types
+from aiogram.filters import Command
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
+from aiogram.types import LabeledPrice, PreCheckoutQuery, InlineKeyboardMarkup, InlineKeyboardButton
 
-# --- НАСТРОЙКИ ---
-TELEGRAM_TOKEN = os.environ.get('TELEGRAM_TOKEN')
-OPENROUTER_KEY = os.environ.get('OPENROUTER_KEY')
-MODEL_NAME = "mistralai/mistral-7b-instruct:free"
+TOKEN = "7592755189:AAG3PHzCSW4iun-_AzynrQFtVuZWS8acZOQ"
+ADMIN_ID = 6444684762
+ADMIN_USER = "@Ezzzzzoochka"
 
-bot = telebot.TeleBot(TELEGRAM_TOKEN)
-app = Flask('')
+bot = Bot(token=TOKEN)
+dp = Dispatcher()
 
-@app.route('/')
-def home():
-    return "Бот запущен и работает!"
+class Order(StatesGroup):
+    waiting_for_target = State()
 
-def run_web():
-    app.run(host='0.0.0.0', port=8080)
+def main_kb():
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="💀 [ DOX / OSINT ]", callback_data="dox")],
+        [InlineKeyboardButton(text="☣️ [ DOX+ / FULL ]", callback_data="dox_plus")],
+        [InlineKeyboardButton(text="🛡️ [ DEF-GUARD / 10 ДНЕЙ ]", callback_data="def")],
+        [InlineKeyboardButton(text="👨‍💻 АДМИН", url=f"https://t.me/{ADMIN_USER[1:]}")]
+    ])
 
-# 1. Мгновенное приветствие на команду /start
-@bot.message_handler(commands=['start'])
-def send_welcome(message):
-    welcome_text = "Привет! 😊 Я твой ИИ-помощник. Напиши мне любой вопрос, и я отвечу простым текстом!"
-    bot.reply_to(message, welcome_text)
+@dp.message(Command("start"))
+async def start(message: types.Message, state: FSMContext):
+    await state.clear()
+    await message.answer("СИСТЕМА ЗАПУЩЕНА.\n————————————————\nВыбирай вектор атаки или защиты:", reply_markup=main_kb(), parse_mode="Markdown")
 
-# 2. Основная обработка сообщений
-@bot.message_handler(func=lambda message: True)
-def handle_ai_request(message):
-    try:
-        # Добавляем инструкцию к запросу пользователя, чтобы убрать символы разметки
-        prompt = f"Отвечай максимально просто, без использования символов Markdown (*, #, _, `). Текст запроса: {message.text}"
-        
-        response = requests.post(
-            url="https://openrouter.ai/api/v1/chat/completions",
-            headers={
-                "Authorization": f"Bearer {OPENROUTER_KEY}",
-                "Content-Type": "application/json",
-                "HTTP-Referer": "https://render.com",
-                "X-Title": "RZDAiBot"
-            },
-            data=json.dumps({
-                "model": MODEL_NAME,
-                "messages": [{"role": "user", "content": prompt}]
-            }),
-            timeout=30
+@dp.callback_query(F.data.in_(["dox", "dox_plus"]))
+async def dox_init(call: types.CallbackQuery, state: FSMContext):
+    mode = "FULL" if call.data == "dox_plus" else "BASE"
+    await state.update_data(mode=call.data)
+    await call.message.edit_text(f"РЕЖИМ: {mode}\nВведи данные цели (юзер/номер/ссылка):")
+    await state.set_state(Order.waiting_for_target)
+
+@dp.message(Order.waiting_for_target)
+async def get_target(message: types.Message, state: FSMContext):
+    user_data = await state.get_data()
+    mode = user_data.get("mode")
+    await state.update_data(target=message.text)
+    
+    if mode == "dox_plus":
+        info_text = (
+            f"🎯 ЦЕЛЬ ПРИНЯТА (DOX+): {message.text}\n\n"
+            "ЧТО ВХОДИТ В FULL ПАКЕТ:\n"
+            "• История сообщений в открытых чатах\n"
+            "• Список групп и каналов цели\n"
+            "• Круг общения: выявление близких контактов\n"
+            "• Анализ речи: частота слов и триггеры\n"
+            "• Местоположение / Адрес (если есть в базах)\n"
+            "• Данные матери / Родственников (при наличии)\n"
+            "• Паспортные данные (если имеются)\n\n"
+            "ЦЕНА: 50 STARS ⭐️"
         )
-        
-        result = response.json()
-        
-        if 'choices' in result and len(result['choices']) > 0:
-            ai_message = result['choices'][0]['message']['content']
-            
-            # Очищаем ответ от возможных остатков спецсимволов вручную
-            clean_message = ai_message.replace('*', '').replace('#', '').replace('_', '').strip()
-            
-            if clean_message:
-                bot.reply_to(message, clean_message)
-            else:
-                bot.reply_to(message, "ИИ прислал пустой ответ, попробуйте спросить иначе.")
-        else:
-            error_text = result.get('error', {}).get('message', 'Ошибка API')
-            bot.reply_to(message, f"Ошибка: {error_text}")
-            
-    except Exception as e:
-        bot.reply_to(message, f"Техническая ошибка: {str(e)}")
+        price, callback_pay = 50, "pay_dox_plus"
+    else:
+        info_text = (
+            f"🎯 ЦЕЛЬ ПРИНЯТА (BASE): {message.text}\n\n"
+            "ЧТО ВХОДИТ В ПАКЕТ:\n"
+            "• Адрес проживания (при наличии в базах)\n"
+            "• Данные матери (если будут найдены)\n"
+            "• Паспортные данные (если есть в реестрах)\n"
+            "• Номера телефонов, почты, соцсети\n"
+            "• Слив информации в профильные чаты\n\n"
+            "ЦЕНА: 15 STARS ⭐️"
+        )
+        price, callback_pay = 15, "pay_dox"
+    
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=f"💳 ОПЛАТИТЬ {price} ⭐️", callback_data=callback_pay)],
+        [InlineKeyboardButton(text="🔙 ОТМЕНА", callback_data="back")]
+    ])
+    await message.answer(info_text, reply_markup=kb, parse_mode="Markdown")
+
+@dp.callback_query(F.data == "def")
+async def def_info(call: types.CallbackQuery):
+    info_text = (
+        "🛡️ ОПЕРАЦИЯ: DEF-GUARD\n"
+        "СРОК ДЕЙСТВИЯ: 10 ДНЕЙ\n\n"
+        "ЧТО ВХОДИТ В ЗАЩИТУ:\n"
+        "• Круглосуточный мониторинг угроз\n"
+        "• Блокировка попыток сваттинга и докса\n"
+        "• Зачистка данных из публичных баз\n"
+        "• Иммунитет к сносу аккаунта\n\n"
+        "ЦЕНА: 15 STARS ⭐️"
+    )
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="💳 КУПИТЬ НА 10 ДНЕЙ - 15 ⭐️", callback_data="pay_def")],
+        [InlineKeyboardButton(text="🔙 НАЗАД", callback_data="back")]
+    ])
+    await call.message.edit_text(info_text, reply_markup=kb, parse_mode="Markdown")
+
+@dp.callback_query(F.data.startswith("pay_"))
+async def send_invoice(call: types.CallbackQuery):
+    if "dox_plus" in call.data:
+        label, amount = "DOX+ FULL", 50
+    elif "dox" in call.data:
+        label, amount = "DOX BASE", 15
+    else:
+        label, amount = "DEF GUARD (10 ДНЕЙ)", 15
+
+    await bot.send_invoice(
+        chat_id=call.from_user.id,
+        title=label,
+        description=f"Активация модуля {label}",
+        payload=call.data,
+        currency="XTR",
+        prices=[LabeledPrice(label=label, amount=amount)],
+        provider_token=""
+    )
+    await call.answer()
+
+@dp.callback_query(F.data == "back")
+async def back(call: types.CallbackQuery, state: FSMContext):
+    await state.clear()
+    await call.message.edit_text("СИСТЕМА ЗАПУЩЕНА.\n————————————————\nВыбирай вектор атаки или защиты:", reply_markup=main_kb(), parse_mode="Markdown")
+    await call.answer()
+
+@dp.pre_checkout_query()
+async def pre_checkout(query: PreCheckoutQuery):
+    await bot.answer_pre_checkout_query(query.id, ok=True)
+
+@dp.message(F.successful_payment)
+async def success(message: types.Message, state: FSMContext):
+    data = await state.get_data()
+    target = data.get("target", "Защита (10 дней)")
+    payload = message.successful_payment.invoice_payload
+    
+    await message.answer(f"✅ ОПЛАЧЕНО.\n\nВ работе. Срочно отпиши админу: {ADMIN_USER}", parse_mode="Markdown")
+    
+    user = message.from_user
+    service = "☣️ DOX+" if "plus" in payload else ("📂 ДОКС" if "dox" in payload else "🛡️ ЗАЩИТА (10 ДНЕЙ)")
+    
+    report = (
+        "💰 ФИКСИРУЮ ПРИБЫЛЬ!\n"
+        "————————————————\n"
+        f"👤 КЛИЕНТ: @{user.username if user.username else 'NoUser'}\n"
+        f"🎯 ЦЕЛЬ: {target}\n"
+        f"📦 УСЛУГА: {service}\n"
+        "————————————————"
+    )
+    await bot.send_message(ADMIN_ID, report, parse_mode="Markdown")
+    await state.clear()
+
+async def main():
+    await bot.delete_webhook(drop_pending_updates=True)
+    await dp.start_polling(bot)
 
 if __name__ == "__main__":
-    # Запуск сервера для Render
-    Thread(target=run_web).start()
-    
-    print("Бот успешно запущен!")
-    # infinity_polling автоматически восстанавливает связь при сбоях
-    bot.infinity_polling(timeout=20, long_polling_timeout=10)
+    asyncio.run(main())
